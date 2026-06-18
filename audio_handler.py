@@ -120,3 +120,7 @@ class FilteringWaveSink(discord.sinks.WaveSink):
     def walk_children(self):
         """pycord 2.8 router 要求 — 迭代子 sink（我們沒有）"""
         return iter(self._children)
+
+    def is_opus(self) -> bool:
+        """WaveSink 儲存 PCM，非 Opus → 需要 decoder"""
+        return False

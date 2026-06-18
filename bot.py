@@ -143,61 +143,74 @@ async def process_audio(
 ):
     """
     管線：WAV 檔 → STT → LLM → TTS → 播放
-    處理所有使用者音訊（包含主人）
-    主人說話時 → LLM 以恭敬態度回答，稱呼「主人」
+    每次只處理「音量最大」的一個使用者，避免多人對話混在一起回答。
+    主人說話時 → LLM 以恭敬態度回答，稱呼「主人」。
+    AI 回覆期間不監聽，播放完才開始下一輪錄音。
     """
     if not sink.audio_data:
         logger.debug("無音訊資料，跳過")
         return
 
-    for user_id, audio_data in sink.audio_data.items():
-        if not audio_data.file or audio_data.file.getbuffer().nbytes == 0:
-            continue
+    # 只取音量最大的一個人（避免多人混雜）
+    def _audio_size(item):
+        _, ad = item
+        return ad.file.getbuffer().nbytes if ad.file else 0
 
-        try:
-            # ---- 寫入暫存 WAV ----
-            timestamp = int(time.time() * 1000)
-            wav_path = os.path.join(TEMP_DIR, f"user_{user_id}_{timestamp}.wav")
-            with open(wav_path, "wb") as f:
-                audio_data.file.seek(0)
-                f.write(audio_data.file.read())
-            logger.info("已儲存音訊: %s (%d bytes)", wav_path, os.path.getsize(wav_path))
+    sorted_users = sorted(sink.audio_data.items(), key=_audio_size, reverse=True)
+    top_user_id, top_audio = sorted_users[0]
 
-            # ---- STT ----
-            text = stt_engine.transcribe(wav_path)
-            if not text:
-                logger.info("STT 結果為空，跳過")
-                continue
+    if not top_audio.file or top_audio.file.getbuffer().nbytes == 0:
+        return
 
-            # ---- LLM (辨識是否為主人，傳入對應態度) ----
-            is_owner = (user_id == MY_USER_ID)
-            if is_owner:
-                logger.info("🎩 主人說話，使用恭敬模式")
-            reply = await llm_engine.chat(text, channel_id, is_owner=is_owner)
-            if not reply:
-                logger.info("LLM 回覆為空，跳過 TTS")
-                continue
+    # 跳過其他使用者，記錄被忽略的人數
+    skipped = len(sorted_users) - 1
+    if skipped > 0:
+        logger.info("多人同時說話，只處理 user_id=%d，跳過 %d 人", top_user_id, skipped)
 
-            # ---- TTS ----
-            tts_out = os.path.join(TEMP_DIR, "tts_output.wav")
-            ok = tts_engine.synthesize(reply, tts_out)
-            if not ok:
-                logger.warning("TTS 失敗，跳過播放")
-                continue
+    try:
+        # ---- 寫入暫存 WAV ----
+        timestamp = int(time.time() * 1000)
+        wav_path = os.path.join(TEMP_DIR, f"user_{top_user_id}_{timestamp}.wav")
+        with open(wav_path, "wb") as f:
+            top_audio.file.seek(0)
+            f.write(top_audio.file.read())
+        logger.info("已儲存音訊: %s (%d bytes)", wav_path, os.path.getsize(wav_path))
 
-            # ---- 播放 ----
-            await play_audio_file(vc, tts_out)
+        # ---- STT ----
+        text = stt_engine.transcribe(wav_path)
+        if not text:
+            logger.info("STT 結果為空，跳過")
+            return
 
-        except Exception as e:
-            logger.error("處理音訊時發生錯誤 (user_id=%d): %s", user_id, e, exc_info=True)
+        # ---- LLM (辨識是否為主人，傳入對應態度) ----
+        is_owner = (top_user_id == MY_USER_ID)
+        if is_owner:
+            logger.info("🎩 主人說話，使用恭敬模式")
+        reply = await llm_engine.chat(text, channel_id, is_owner=is_owner)
+        if not reply:
+            logger.info("LLM 回覆為空，跳過 TTS")
+            return
 
-        finally:
-            # 清理暫存 WAV
-            if os.path.exists(wav_path):
-                try:
-                    os.remove(wav_path)
-                except OSError:
-                    pass
+        # ---- TTS ----
+        tts_out = os.path.join(TEMP_DIR, "tts_output.wav")
+        ok = tts_engine.synthesize(reply, tts_out)
+        if not ok:
+            logger.warning("TTS 失敗，跳過播放")
+            return
+
+        # ---- 播放（AI 回覆期間不監聽，播完才重新錄音）----
+        await play_audio_file(vc, tts_out)
+
+    except Exception as e:
+        logger.error("處理音訊時發生錯誤 (user_id=%d): %s", top_user_id, e, exc_info=True)
+
+    finally:
+        # 清理暫存 WAV
+        if os.path.exists(wav_path):
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
 
 
 # ============================================================
