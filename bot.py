@@ -267,6 +267,13 @@ async def on_ready():
     logger.info("✅ 所有引擎就緒，等待指令...")
     logger.info("   使用 /join 讓 Bot 加入語音頻道")
 
+    # 同步 Slash 指令到 Discord
+    try:
+        synced = await bot.sync_commands()
+        logger.info("✅ Slash 指令已同步: %d 個指令", len(synced))
+    except Exception as e:
+        logger.warning("⚠ Slash 指令同步失敗: %s", e)
+
 
 @bot.event
 async def on_voice_state_update(member, before, after):
