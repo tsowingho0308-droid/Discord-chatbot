@@ -30,6 +30,9 @@ temp/
 *.mp3
 *.opus
 
+# Allow pre-rendered audio assets
+!audio/*.wav
+
 # Model files (too large)
 models/
 *.bin
