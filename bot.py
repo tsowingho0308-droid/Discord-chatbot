@@ -87,7 +87,8 @@ async def voice_loop(vc: discord.VoiceClient, channel_id: int):
 
     try:
         while _active_loops.get(guild_id, False) and vc.is_connected():
-            event = audio_capture.get_next(timeout=0.3)
+            # 用執行緒池包裝 blocking Queue.get()，避免卡住 asyncio 事件循環
+            event = await asyncio.to_thread(audio_capture.get_next, timeout=0.3)
 
             if event is None:
                 continue
