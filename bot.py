@@ -65,7 +65,7 @@ _active_loops: dict[int, bool] = {}
 # ============================================================
 # 語音處理核心循環
 # ============================================================
-async def voice_loop(vc: discord.VoiceClient, channel_id: int):
+async def voice_loop(vc: discord.voice.VoiceClient, channel_id: int):
     """
     語音處理主循環：
     錄音 → 等靜音/打斷 → 停止 → 處理 → 播放 → 重複
@@ -137,7 +137,7 @@ async def voice_loop(vc: discord.VoiceClient, channel_id: int):
 # ============================================================
 async def process_audio(
     sink: FilteringWaveSink,
-    vc: discord.VoiceClient,
+    vc: discord.voice.VoiceClient,
     channel_id: int,
 ):
     """
@@ -202,7 +202,7 @@ async def process_audio(
 # ============================================================
 # 播放輔助函式
 # ============================================================
-async def play_audio_file(vc: discord.VoiceClient, file_path: str):
+async def play_audio_file(vc: discord.voice.VoiceClient, file_path: str):
     """使用 FFmpeg 播放音訊檔案，等待播放完成"""
     if not os.path.exists(file_path):
         logger.warning("播放檔案不存在: %s", file_path)
