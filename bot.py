@@ -17,7 +17,7 @@ from config import (
     TOO_NOISY_WAV,
     TOO_NOISY_OWNER_WAV,
     TEMP_DIR,
-    TTS_CHARACTER,
+    TTS_SPEAKER,
 )
 from audio_handler import FilteringWaveSink
 from stt import STTEngine
@@ -254,10 +254,10 @@ async def on_ready():
         logger.error("LLM 引擎初始化失敗: %s", e)
         sys.exit(1)
 
-    # 初始化 TTS 引擎
+    # 初始化 TTS 引擎 (Hugging Face Spaces)
     try:
         tts_engine = TTSEngine()
-        logger.info("TTS 引擎就緒: %s", tts_engine.api_url)
+        logger.info("TTS 引擎就緒: %s", tts_engine.speaker)
     except Exception as e:
         logger.error("TTS 引擎初始化失敗: %s", e)
         sys.exit(1)
@@ -353,18 +353,18 @@ async def cmd_leave(ctx: discord.ApplicationContext):
 # ============================================================
 # 指令: /set_voice
 # ============================================================
-@bot.slash_command(name="set_voice", description="切換 TTS 音色")
+@bot.slash_command(name="set_voice", description="切換 TTS 角色聲音")
 async def cmd_set_voice(
     ctx: discord.ApplicationContext,
-    character: discord.Option(str, "GPT-SoVITS 音色名稱", default="default"),
+    character: discord.Option(str, "角色名稱 (例如: 纳西妲 Nahida (Genshin Impact))"),
 ):
-    """切換 TTS 音色"""
+    """切換 TTS 角色"""
     if tts_engine is None:
         await ctx.respond("❌ TTS 引擎尚未初始化", ephemeral=True)
         return
 
     tts_engine.update_character(character)
-    await ctx.respond(f"🎤 TTS 音色已切換為 `{character}`")
+    await ctx.respond(f"🎤 TTS 角色已切換為 `{character}`")
 
 
 # ============================================================
@@ -385,10 +385,10 @@ async def cmd_status(ctx: discord.ApplicationContext):
     msg = (
         f"**Bot 狀態**\n"
         f"• 語音頻道: {voice_status}\n"
-        f"• TTS 音色: `{tts_char}`\n"
+        f"• TTS 角色: `{tts_char}`\n"
         f"• LLM: `deepseek-chat`\n"
         f"• STT: `faster-whisper tiny (CPU)`\n"
-        f"• 主人 ID: `{MY_USER_ID}` (特殊態度 + 打斷優先)\n"
+        f"• 主人 ID: `{MY_USER_ID}`\n"
     )
     await ctx.respond(msg, ephemeral=True)
 

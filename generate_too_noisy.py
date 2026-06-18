@@ -1,26 +1,19 @@
 """
-生成打斷語音檔案（雙版本）
+生成打斷語音檔案（雙版本）— 使用 Hugging Face VITS TTS API
 - 「太吵了，一個一個說」（一般版）
 - 「你們安靜，吵到我主人講話了」（主人版）
 
 使用方式：
-    python generate_too_noisy.py              # 生成兩個版本
-    python generate_too_noisy.py --beep-only  # 只用替代音效（無需 TTS）
+    python generate_too_noisy.py              # 用 TTS API 生成真實語音
+    python generate_too_noisy.py --beep-only  # 只用替代音效（無網路時）
 """
 import os
 import sys
 import wave
 import struct
 import argparse
-
-try:
-    import requests
-    from config import TTS_API_URL, TTS_CHARACTER
-    HAS_TTS_CONFIG = True
-except ImportError:
-    HAS_TTS_CONFIG = False
-    TTS_API_URL = "http://127.0.0.1:9880"
-    TTS_CHARACTER = "default"
+from gradio_client import Client
+from config import TTS_HF_SPACE, TTS_SPEAKER, TTS_LANGUAGE, TTS_SPEED
 
 AUDIO_DIR = "audio"
 
@@ -39,9 +32,9 @@ OUTPUT_PATHS = {
 def generate_beep_wav(path: str, beep_count: int = 2):
     """生成簡單的替代音效（多個短嗶聲）"""
     sample_rate = 48000
-    duration = 0.3   # 每個嗶聲 0.3 秒
-    freq = 880       # A5 音高
-    gap = 0.2        # 嗶聲之間停頓 0.2 秒
+    duration = 0.3
+    freq = 880
+    gap = 0.2
 
     samples_per_beep = int(sample_rate * duration)
     samples_gap = int(sample_rate * gap)
@@ -67,66 +60,79 @@ def generate_beep_wav(path: str, beep_count: int = 2):
             if b < beep_count - 1:
                 wf.writeframes(b"\x00\x00" * samples_gap)
 
-    print(f"✅ 替代音效已生成: {path}")
+    print(f"[OK] Beep fallback generated: {path}")
 
 
-def generate_tts_wav(path: str, text: str):
-    """透過 GPT-SoVITS API 生成語音"""
-    url = f"{TTS_API_URL.rstrip('/')}/tts"
-    payload = {"text": text, "character": TTS_CHARACTER}
+def generate_tts_wav(client: Client, path: str, text: str):
+    """透過 VITS Gradio API 生成語音"""
+    print(f"Text: {text}")
+    print(f"Speaker: {TTS_SPEAKER}")
+    print(f"Language: {TTS_LANGUAGE}")
 
-    print(f"發送 TTS 請求到: {url}")
-    print(f"文字: {text}")
-    print(f"音色: {TTS_CHARACTER}")
+    result = client.predict(
+        text=text,
+        speaker=TTS_SPEAKER,
+        language=TTS_LANGUAGE,
+        speed=TTS_SPEED,
+        is_symbol=False,
+        api_name="/tts_fn",
+    )
 
-    resp = requests.post(url, json=payload, timeout=30)
-    if resp.status_code == 200:
-        with open(path, "wb") as f:
-            f.write(resp.content)
-        print(f"✅ TTS 語音已生成: {path} ({len(resp.content)} bytes)")
-        return True
+    message, tmp_path = result
+
+    if tmp_path and os.path.exists(tmp_path):
+        import shutil
+        shutil.copy2(tmp_path, path)
+        print(f"[OK] TTS audio saved: {path} ({os.path.getsize(path)} bytes)")
     else:
-        print(f"❌ TTS API 失敗: status={resp.status_code}, body={resp.text[:200]}")
+        print(f"[FAIL] No file returned. Message: {message}")
         return False
+    return True
 
 
 def generate_all(beep_only: bool = False):
     """生成所有打斷語音版本"""
     os.makedirs(AUDIO_DIR, exist_ok=True)
 
+    client = None
+    if not beep_only:
+        try:
+            print(f"Connecting to {TTS_HF_SPACE} ...")
+            client = Client(TTS_HF_SPACE)
+            print("Connected!")
+        except Exception as e:
+            print(f"[WARN] Cannot connect to TTS API: {e}")
+            print("[WARN] Falling back to beep sounds...")
+            beep_only = True
+
     for key, text in VERSION_TEXTS.items():
         path = OUTPUT_PATHS[key]
         print(f"\n{'=' * 50}")
-        print(f"生成: {key} → \"{text}\"")
+        print(f"Generating: {key}")
 
-        if beep_only:
-            # 主人版用 3 個嗶聲區別
+        if beep_only or client is None:
             beeps = 3 if "owner" in key else 2
             generate_beep_wav(path, beep_count=beeps)
         else:
             try:
-                ok = generate_tts_wav(path, text)
+                ok = generate_tts_wav(client, path, text)
                 if not ok:
-                    print("⚠ TTS 失敗，改用替代音效...")
                     beeps = 3 if "owner" in key else 2
                     generate_beep_wav(path, beep_count=beeps)
             except Exception as e:
-                print(f"⚠ TTS 錯誤: {e}，改用替代音效...")
+                print(f"[WARN] TTS error: {e}")
                 beeps = 3 if "owner" in key else 2
                 generate_beep_wav(path, beep_count=beeps)
 
     print(f"\n{'=' * 50}")
-    print("✅ 所有打斷語音生成完成！")
+    print("All done!")
     for key, path in OUTPUT_PATHS.items():
-        size = os.path.getsize(path) if os.path.exists(path) else 0
-        print(f"  {key}: {path} ({size} bytes)")
+        if os.path.exists(path):
+            print(f"  {key}: {path} ({os.path.getsize(path)} bytes)")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="生成 Discord Bot 打斷語音")
-    parser.add_argument(
-        "--beep-only", action="store_true",
-        help="只使用替代嗶聲音效（無需 TTS API）"
-    )
+    parser = argparse.ArgumentParser(description="Generate interrupt audio for Discord Bot")
+    parser.add_argument("--beep-only", action="store_true", help="Use beep sounds only (no internet)")
     args = parser.parse_args()
     generate_all(beep_only=args.beep_only)

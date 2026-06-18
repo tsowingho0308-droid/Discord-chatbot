@@ -42,10 +42,12 @@ SYSTEM_PROMPT = (
 )
 
 # ============================================================
-# TTS (GPT-SoVITS on Google Colab — 外網 URL)
+# TTS (Hugging Face Spaces — VITS-Umamusume-voice-synthesizer)
 # ============================================================
-TTS_API_URL = os.getenv("TTS_API_URL", "http://127.0.0.1:9880")
-TTS_CHARACTER = os.getenv("TTS_CHARACTER", "default")
+TTS_HF_SPACE = "Plachta/VITS-Umamusume-voice-synthesizer"
+TTS_SPEAKER = os.getenv("TTS_SPEAKER", "纳西妲 Nahida (Genshin Impact)")
+TTS_LANGUAGE = os.getenv("TTS_LANGUAGE", "简体中文")
+TTS_SPEED = float(os.getenv("TTS_SPEED", "1.0"))
 
 # ============================================================
 # 音訊設定
