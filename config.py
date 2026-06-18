@@ -3,15 +3,47 @@ Discord Voice Bot — 設定中心
 所有機密資訊從 .env 載入
 """
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
+# ============================================================
+# 輔助函式 — 檢查 .env 是否已正確填寫
+# ============================================================
+def _require_env(key: str) -> str:
+    """讀取環境變數，若未設定或還是範本值則報錯退出"""
+    value = os.getenv(key, "")
+    if not value or value.startswith("your_"):
+        print(f"\n{'='*60}")
+        print(f"❌ .env 設定錯誤：{key} 尚未填寫")
+        print(f"   請編輯專案根目錄的 .env 檔案")
+        print(f"   把 {key}=your_xxx 換成你的真實資料")
+        print(f"{'='*60}\n")
+        sys.exit(1)
+    return value
+
+
+def _require_int(key: str) -> int:
+    """讀取並轉為整數，無法轉換則報錯"""
+    raw = _require_env(key)
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"\n{'='*60}")
+        print(f"❌ .env 設定錯誤：{key} 必須是純數字")
+        print(f"   目前的值: {raw}")
+        print(f"   Discord User ID 是 17-19 位數字，在 Discord 設定中可找到")
+        print(f"{'='*60}\n")
+        sys.exit(1)
+
+
 # ============================================================
 # Discord 設定
 # ============================================================
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-MY_USER_ID = int(os.getenv("MY_USER_ID", "0"))
+DISCORD_TOKEN = _require_env("DISCORD_TOKEN")
+MY_USER_ID = _require_int("MY_USER_ID")
 
 # ============================================================
 # STT (faster-whisper — tiny, CPU only)
@@ -23,7 +55,7 @@ WHISPER_COMPUTE_TYPE = "int8"
 # ============================================================
 # LLM (DeepSeek-chat — OpenAI 相容 API)
 # ============================================================
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_API_KEY = _require_env("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 LLM_MODEL = "deepseek-chat"
 LLM_MAX_RESPONSE_CHARS = 20       # System prompt 嚴格限制回答長度
@@ -45,7 +77,7 @@ SYSTEM_PROMPT = (
 # TTS (Hugging Face Spaces — VITS-Umamusume-voice-synthesizer)
 # ============================================================
 TTS_HF_SPACE = "Plachta/VITS-Umamusume-voice-synthesizer"
-TTS_SPEAKER = os.getenv("TTS_SPEAKER", "纳西妲 Nahida (Genshin Impact)")
+TTS_SPEAKER = os.getenv("TTS_SPEAKER", "待兼诗歌剧 Matikane Tannhauser (Umamusume Pretty Derby)")
 TTS_LANGUAGE = os.getenv("TTS_LANGUAGE", "简体中文")
 TTS_SPEED = float(os.getenv("TTS_SPEED", "1.0"))
 

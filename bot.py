@@ -397,11 +397,5 @@ async def cmd_status(ctx: discord.ApplicationContext):
 # 啟動
 # ============================================================
 if __name__ == "__main__":
-    if not DISCORD_TOKEN:
-        logger.error("❌ DISCORD_TOKEN 未設定！請在 .env 檔案中設定")
-        sys.exit(1)
-    if MY_USER_ID == 0:
-        logger.warning("⚠ MY_USER_ID 未設定或為 0，Bot 將無法辨識主人！")
-
     logger.info("啟動 Discord Bot...")
     bot.run(DISCORD_TOKEN)
