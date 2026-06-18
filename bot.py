@@ -63,6 +63,24 @@ _active_loops: dict[int, bool] = {}
 
 
 # ============================================================
+# 輔助 — 清空擷取佇列
+# ============================================================
+def _flush_capture_queue():
+    """清空音訊擷取佇列，丟棄 AI 播放期間錄到的自己聲音"""
+    if audio_capture is None:
+        return
+    flushed = 0
+    while True:
+        try:
+            audio_capture.output_queue.get_nowait()
+            flushed += 1
+        except Exception:
+            break
+    if flushed:
+        logger.debug("清空擷取佇列: 丟棄 %d 個片段", flushed)
+
+
+# ============================================================
 # 語音處理主循環（使用系統音訊擷取）
 # ============================================================
 async def voice_loop(vc: discord.VoiceClient, channel_id: int):
@@ -99,11 +117,13 @@ async def voice_loop(vc: discord.VoiceClient, channel_id: int):
                 # 多人吵雜 → 播放打斷語音
                 logger.info("多人吵雜檢測，播放打斷語音")
                 await play_audio_file(vc, TOO_NOISY_WAV)
+                _flush_capture_queue()  # 清空播放期間錄到的自己聲音
 
             elif kind == "speech":
                 wav_path = args[0]
-                # 處理語音片段（完整管線）
+                # 處理語音片段 → STT → LLM → TTS → 播放
                 await process_captured_audio(vc, channel_id, wav_path)
+                _flush_capture_queue()  # 清空 AI 講話期間錄到的自己聲音
                 # 清理暫存
                 if os.path.exists(wav_path):
                     try:
