@@ -31,9 +31,9 @@ class FilteringWaveSink(discord.sinks.WaveSink):
         self.max_speakers = MAX_SPEAKERS_BEFORE_INTERRUPT
         self.cooldown = SPEAKER_COOLDOWN
 
-        # 確保 __sink_listeners__ 存在（相容新版 pycord）
-        if not hasattr(self, "__sink_listeners__"):
-            self.__sink_listeners__ = {}
+        # pycord 2.8.0 router 需要的屬性（基類未提供）
+        self.__sink_listeners__ = []
+        self._children: list = []
 
         # 說話者時間戳 (user_id → last_spoke_time)
         self.speaker_timestamps: dict[int, float] = {}
@@ -116,3 +116,7 @@ class FilteringWaveSink(discord.sinks.WaveSink):
     def is_owner(self, user_id: int) -> bool:
         """檢查指定 user_id 是否為主人"""
         return user_id == self.owner_id
+
+    def walk_children(self):
+        """pycord 2.8 router 要求 — 迭代子 sink（我們沒有）"""
+        return iter(self._children)
