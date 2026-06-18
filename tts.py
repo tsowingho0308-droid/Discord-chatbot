@@ -5,6 +5,7 @@ TTS 模組 — Hugging Face Spaces 上的 VITS-Umamusume-voice-synthesizer
 切換角色：改 .env 的 TTS_SPEAKER，或 Discord 內用 /set_voice
 完整角色列表：https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer
 """
+import asyncio
 import os
 import shutil
 import logging
@@ -34,21 +35,10 @@ class TTSEngine:
         logger.info("TTS 角色已切換為: %s", speaker)
 
     def synthesize(self, text: str, output_path: str) -> bool:
-        """
-        將文字送入 VITS API，下載產生的 WAV 到 output_path。
-        回傳 True 表示成功，False 表示失敗。
-        """
+        """同步版本（會阻塞，僅供非 async 情境使用）"""
         if not text:
-            logger.warning("TTS 輸入文字為空，跳過")
             return False
-
         try:
-            logger.info(
-                "TTS 請求: text='%s', speaker=%s, lang=%s, speed=%.1f",
-                text, self.speaker, self.language, self.speed,
-            )
-
-            # 呼叫 Hugging Face Gradio API
             result = self.client.predict(
                 text=text,
                 speaker=self.speaker,
@@ -57,20 +47,17 @@ class TTSEngine:
                 is_symbol=False,
                 api_name="/tts_fn",
             )
-
-            # result 是 tuple: (message_str, filepath_str)
-            # filepath 是 gradio_client 自動下載到本機暫存的路徑
             message, tmp_path = result
-
             if tmp_path and os.path.exists(tmp_path):
                 shutil.copy2(tmp_path, output_path)
-                size = os.path.getsize(output_path)
-                logger.info("TTS 成功: WAV 已寫入 %s (%d bytes)", output_path, size)
+                logger.info("TTS 成功: %s (%d bytes)", output_path, os.path.getsize(output_path))
                 return True
-            else:
-                logger.error("TTS 回傳的檔案不存在: %s, message=%s", tmp_path, message)
-                return False
-
-        except Exception as e:
-            logger.error("TTS 呼叫失敗: %s", e)
+            logger.error("TTS 回傳檔案不存在: %s", tmp_path)
             return False
+        except Exception as e:
+            logger.error("TTS 失敗: %s", e)
+            return False
+
+    async def async_synthesize(self, text: str, output_path: str) -> bool:
+        """非同步版本 — 用 asyncio.to_thread 包裝，避免卡住事件循環"""
+        return await asyncio.to_thread(self.synthesize, text, output_path)

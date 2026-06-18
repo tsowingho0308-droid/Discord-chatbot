@@ -148,7 +148,7 @@ async def process_captured_audio(vc: discord.VoiceClient, channel_id: int, wav_p
 
     # ---- TTS ----
     tts_out = os.path.join(TEMP_DIR, "tts_output.wav")
-    ok = tts_engine.synthesize(reply, tts_out)
+    ok = await tts_engine.async_synthesize(reply, tts_out)
     if not ok:
         logger.warning("TTS 失敗")
         return
