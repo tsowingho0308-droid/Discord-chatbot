@@ -84,12 +84,15 @@ TTS_SPEED = float(os.getenv("TTS_SPEED", "1.0"))
 # ============================================================
 # 音訊設定
 # ============================================================
-AUDIO_SAMPLE_RATE = 48000          # Discord 標準
-AUDIO_CHANNELS = 2                 # 立體聲
-AUDIO_SAMPLE_WIDTH = 2             # 16-bit PCM = 2 bytes (pydub 用)
-SILENCE_TIMEOUT = 1.5              # 靜音超時秒數（判斷發言結束）
-MAX_SPEAKERS_BEFORE_INTERRUPT = 2  # >2 人同時說話就觸發打斷
-SPEAKER_COOLDOWN = 0.5             # 同一個人的冷卻時間（秒）
+AUDIO_SAMPLE_RATE = 48000          # Discord / PyAudio 通用
+AUDIO_CHANNELS = 2
+AUDIO_SAMPLE_WIDTH = 2             # 16-bit PCM
+SILENCE_TIMEOUT = 1.5              # 靜音超時（秒）
+SILENCE_THRESHOLD = int(os.getenv("SILENCE_THRESHOLD", "400"))      # VAD 音量閾值
+NOISE_THRESHOLD = int(os.getenv("NOISE_THRESHOLD", "3000"))         # 多人吵雜閾值
+AUDIO_CAPTURE_DEVICE = os.getenv("AUDIO_CAPTURE_DEVICE")            # None=預設裝置
+if AUDIO_CAPTURE_DEVICE is not None:
+    AUDIO_CAPTURE_DEVICE = int(AUDIO_CAPTURE_DEVICE)
 
 # ============================================================
 # 檔案路徑
