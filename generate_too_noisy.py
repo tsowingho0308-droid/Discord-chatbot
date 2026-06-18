@@ -12,6 +12,11 @@ import sys
 import wave
 import struct
 import argparse
+
+# 修正 Windows 中文編碼問題
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from gradio_client import Client
 from config import TTS_HF_SPACE, TTS_SPEAKER, TTS_LANGUAGE, TTS_SPEED
 
