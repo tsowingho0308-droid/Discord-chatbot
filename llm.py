@@ -41,17 +41,27 @@ class LLMEngine:
         """清除指定頻道的對話歷史"""
         self._histories.pop(channel_id, None)
 
-    async def chat(self, user_text: str, channel_id: int = 0) -> str:
+    async def chat(self, user_text: str, channel_id: int = 0, is_owner: bool = False) -> str:
         """
         將使用者文字送入 DeepSeek-chat，取得回覆。
-        回覆限制在 20 中文字以內。
+
+        參數:
+            user_text: 使用者的語音辨識結果
+            channel_id: Discord 頻道 ID（用於對話歷史隔離）
+            is_owner: 說話者是否為主人（True → 用恭敬態度）
         """
         history = self._get_history(channel_id)
+
+        # 當主人說話時，在訊息前面加上標記讓 LLM 知道
+        if is_owner:
+            tagged_text = f"[這是主人在說話] {user_text}"
+        else:
+            tagged_text = f"[這是一般使用者] {user_text}"
 
         # 建立訊息列表：system prompt + 歷史 + 當前輸入
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
-        messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "user", "content": tagged_text})
 
         try:
             response = await self.client.chat.completions.create(
@@ -64,7 +74,7 @@ class LLMEngine:
             logger.info("LLM 回覆 (%d 字): %s", len(reply), reply)
 
             # 更新對話歷史（保留最近 10 輪）
-            history.append({"role": "user", "content": user_text})
+            history.append({"role": "user", "content": tagged_text})
             history.append({"role": "assistant", "content": reply})
             if len(history) > 20:  # 10 輪 = 20 條訊息
                 self._histories[channel_id] = history[-20:]

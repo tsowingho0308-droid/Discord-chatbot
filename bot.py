@@ -15,6 +15,7 @@ from config import (
     MY_USER_ID,
     SILENCE_TIMEOUT,
     TOO_NOISY_WAV,
+    TOO_NOISY_OWNER_WAV,
     TEMP_DIR,
     TTS_CHARACTER,
 )
@@ -112,8 +113,13 @@ async def voice_loop(vc: discord.VoiceClient, channel_id: int):
 
             # -------- 4. 處理階段 --------
             if sink.interrupted:
-                # 打斷機制：播放「太吵了」語音，跳過 LLM
-                await play_audio_file(vc, TOO_NOISY_WAV)
+                # 打斷機制：根據主人是否在場選擇不同語音
+                if sink.owner_involved:
+                    logger.info("播放主人版打斷語音: 「你們安靜，吵到我主人講話了」")
+                    await play_audio_file(vc, TOO_NOISY_OWNER_WAV)
+                else:
+                    logger.info("播放一般打斷語音: 「太吵了，一個一個說」")
+                    await play_audio_file(vc, TOO_NOISY_WAV)
             else:
                 # 正常流程：處理每位說話者的音訊
                 await process_audio(sink, vc, channel_id)
@@ -136,7 +142,8 @@ async def process_audio(
 ):
     """
     管線：WAV 檔 → STT → LLM → TTS → 播放
-    處理所有錄到的非 owner 使用者音訊
+    處理所有使用者音訊（包含主人）
+    主人說話時 → LLM 以恭敬態度回答，稱呼「主人」
     """
     if not sink.audio_data:
         logger.debug("無音訊資料，跳過")
@@ -161,8 +168,11 @@ async def process_audio(
                 logger.info("STT 結果為空，跳過")
                 continue
 
-            # ---- LLM ----
-            reply = await llm_engine.chat(text, channel_id)
+            # ---- LLM (辨識是否為主人，傳入對應態度) ----
+            is_owner = (user_id == MY_USER_ID)
+            if is_owner:
+                logger.info("🎩 主人說話，使用恭敬模式")
+            reply = await llm_engine.chat(text, channel_id, is_owner=is_owner)
             if not reply:
                 logger.info("LLM 回覆為空，跳過 TTS")
                 continue
@@ -225,7 +235,7 @@ async def on_ready():
 
     logger.info("=" * 50)
     logger.info("Bot 已上線: %s (ID: %d)", bot.user.name, bot.user.id)
-    logger.info("MY_USER_ID (過濾對象): %d", MY_USER_ID)
+    logger.info("主人 ID (特殊態度對象): %d", MY_USER_ID)
 
     # 初始化 STT 引擎（首次載入會下載 tiny 模型）
     logger.info("正在載入 faster-whisper 模型...")
@@ -378,7 +388,7 @@ async def cmd_status(ctx: discord.ApplicationContext):
         f"• TTS 音色: `{tts_char}`\n"
         f"• LLM: `deepseek-chat`\n"
         f"• STT: `faster-whisper tiny (CPU)`\n"
-        f"• 擁有者過濾: `user_id={MY_USER_ID}`\n"
+        f"• 主人 ID: `{MY_USER_ID}` (特殊態度 + 打斷優先)\n"
     )
     await ctx.respond(msg, ephemeral=True)
 
@@ -391,7 +401,7 @@ if __name__ == "__main__":
         logger.error("❌ DISCORD_TOKEN 未設定！請在 .env 檔案中設定")
         sys.exit(1)
     if MY_USER_ID == 0:
-        logger.warning("⚠ MY_USER_ID 未設定或為 0，Bot 不會過濾任何人！")
+        logger.warning("⚠ MY_USER_ID 未設定或為 0，Bot 將無法辨識主人！")
 
     logger.info("啟動 Discord Bot...")
     bot.run(DISCORD_TOKEN)
