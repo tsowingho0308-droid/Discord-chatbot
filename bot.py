@@ -293,21 +293,23 @@ async def on_voice_state_update(member, before, after):
 @bot.slash_command(name="join", description="讓 Bot 加入你所在的語音頻道並開始監聽")
 async def cmd_join(ctx: discord.ApplicationContext):
     """加入語音頻道"""
+    # 先 defer 避免 3 秒超時
+    await ctx.defer(ephemeral=True)
+
     # 檢查使用者是否在語音頻道中
     if not ctx.author.voice or not ctx.author.voice.channel:
-        await ctx.respond("❌ 你必須先加入一個語音頻道！", ephemeral=True)
+        await ctx.followup.send("❌ 你必須先加入一個語音頻道！", ephemeral=True)
         return
 
     channel = ctx.author.voice.channel
 
     # 檢查 Bot 是否已在語音頻道中
     if ctx.voice_client is not None:
-        # 已在某個頻道中
         if ctx.voice_client.channel.id == channel.id:
-            await ctx.respond(f"⚠ 我已經在 `{channel.name}` 了！", ephemeral=True)
+            await ctx.followup.send(f"⚠ 我已經在 `{channel.name}` 了！", ephemeral=True)
         else:
             await ctx.voice_client.move_to(channel)
-            await ctx.respond(f"🔊 已移動到 `{channel.name}`")
+            await ctx.followup.send(f"🔊 已移動到 `{channel.name}`")
         return
 
     # 連接到語音頻道
@@ -315,10 +317,10 @@ async def cmd_join(ctx: discord.ApplicationContext):
         vc = await channel.connect()
     except Exception as e:
         logger.error("無法連接到語音頻道: %s", e)
-        await ctx.respond(f"❌ 無法連線: {e}", ephemeral=True)
+        await ctx.followup.send(f"❌ 無法連線: {e}", ephemeral=True)
         return
 
-    await ctx.respond(f"🔊 已加入 `{channel.name}`，開始監聽！")
+    await ctx.followup.send(f"🔊 已加入 `{channel.name}`，開始監聽！")
 
     # 啟動語音處理循環（非同步背景執行）
     asyncio.create_task(voice_loop(vc, channel.id))
@@ -330,10 +332,12 @@ async def cmd_join(ctx: discord.ApplicationContext):
 @bot.slash_command(name="leave", description="讓 Bot 離開語音頻道")
 async def cmd_leave(ctx: discord.ApplicationContext):
     """離開語音頻道"""
+    await ctx.defer(ephemeral=True)
+
     vc = ctx.voice_client
 
     if vc is None:
-        await ctx.respond("❌ Bot 目前不在任何語音頻道中", ephemeral=True)
+        await ctx.followup.send("❌ Bot 目前不在任何語音頻道中", ephemeral=True)
         return
 
     # 停止語音循環
@@ -355,7 +359,7 @@ async def cmd_leave(ctx: discord.ApplicationContext):
     if llm_engine:
         llm_engine.clear_history(ctx.channel.id)
 
-    await ctx.respond("👋 已離開語音頻道")
+    await ctx.followup.send("👋 已離開語音頻道")
 
 
 # ============================================================
