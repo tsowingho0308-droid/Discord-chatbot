@@ -8,6 +8,7 @@
 import time
 import logging
 import discord
+from discord.sinks import Filters
 from config import MY_USER_ID, MAX_SPEAKERS_BEFORE_INTERRUPT, SPEAKER_COOLDOWN
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,9 @@ class FilteringWaveSink(discord.sinks.WaveSink):
     1. 追蹤主人是否正在說話（用於後續以「主人」稱呼）
     2. 即時追蹤活躍說話者數量
     3. 超過閾值時觸發打斷旗標，並區分主人是否在場
+
+    注意：必須使用 @Filters.container 裝飾器覆寫 write()，
+    否則 pycord 新版 Sink 事件系統無法正確註冊。
     """
 
     def __init__(self, *, filters=None, **kwargs):
@@ -26,6 +30,10 @@ class FilteringWaveSink(discord.sinks.WaveSink):
         self.owner_id = MY_USER_ID
         self.max_speakers = MAX_SPEAKERS_BEFORE_INTERRUPT
         self.cooldown = SPEAKER_COOLDOWN
+
+        # 確保 __sink_listeners__ 存在（相容新版 pycord）
+        if not hasattr(self, "__sink_listeners__"):
+            self.__sink_listeners__ = {}
 
         # 說話者時間戳 (user_id → last_spoke_time)
         self.speaker_timestamps: dict[int, float] = {}
@@ -38,6 +46,7 @@ class FilteringWaveSink(discord.sinks.WaveSink):
         # 最後收到有效音訊的時間（用於靜音偵測）
         self.last_audio_time: float = time.time()
 
+    @Filters.container
     def write(self, data, user):
         """
         Pycord 每 20ms 呼叫一次，傳入 Opus 解碼後的 PCM 資料和說話者。
