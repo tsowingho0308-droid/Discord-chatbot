@@ -1,5 +1,6 @@
 """
-STT 模組 — 使用 faster-whisper (tiny, CPU only) 將語音轉為文字
+STT 模組 — 使用 faster-whisper (base, CPU) 將語音轉為文字
+支援粵語 / 普通話 / 混合口語
 """
 import logging
 from faster_whisper import WhisperModel
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class STTEngine:
-    """語音轉文字引擎 — faster-whisper tiny 模型"""
+    """語音轉文字引擎 — faster-whisper base 模型"""
 
     def __init__(self):
         logger.info(
@@ -25,13 +26,13 @@ class STTEngine:
 
     def transcribe(self, wav_path: str) -> str:
         """
-        將 WAV 檔案轉為文字。
-        回傳辨識結果字串；若失敗或無內容則回傳空字串。
+        將 WAV 檔案轉為文字。language=None 自動偵測語言，
+        對粵語/普通話混合口語有更好的辨識率。
         """
         try:
             segments, _ = self.model.transcribe(
                 wav_path,
-                language="zh",
+                language=None,       # 自動偵測（粵語/國語）
                 beam_size=5,
                 vad_filter=True,
             )
