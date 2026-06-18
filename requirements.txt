@@ -1,4 +1,6 @@
-py-cord[voice]>=2.0.0
+# pycord master 分支（可能已有 DAVE E2EE 修復）
+# 穩定版改回 py-cord[voice]>=2.0.0
+git+https://github.com/Pycord-Development/pycord.git@master
 faster-whisper>=1.0.0
 openai>=1.0.0
 python-dotenv>=1.0.0
