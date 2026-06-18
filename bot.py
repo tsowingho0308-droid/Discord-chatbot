@@ -1,5 +1,5 @@
 """
-Discord Voice Bot — 主程式入口
+Discord Voice Bot — 主程式入口 (discord.py 2.4+)
 功能：加入語音頻道 → 監聽 → STT → DeepSeek → TTS → 播放
 """
 from __future__ import annotations
@@ -10,6 +10,7 @@ import sys
 import logging
 import discord
 from discord.ext import commands
+from discord import app_commands
 
 from config import (
     DISCORD_TOKEN,
@@ -35,7 +36,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot")
 
-# 降低 discord 內部 log 噪音
 logging.getLogger("discord").setLevel(logging.WARNING)
 logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 
@@ -81,30 +81,26 @@ async def voice_loop(vc: discord.VoiceClient, channel_id: int):
             sink = FilteringWaveSink()
             vc.start_recording(
                 sink,
-                callback=lambda s: None,  # 我們自行處理 sink
+                callback=lambda s: None,
             )
             logger.debug("開始錄音週期")
 
-            # -------- 2. 等待觸發條件（靜音 或 打斷）--------
+            # -------- 2. 等待觸發條件 --------
             while True:
                 await asyncio.sleep(0.3)
 
-                # 檢查是否已斷線
                 if not vc.is_connected():
                     break
 
-                # 檢查打斷旗標
                 if sink.interrupted:
                     logger.info("觸發打斷：多人同時說話")
                     break
 
-                # 檢查靜音超時（有人在說話後停止）
                 elapsed = time.time() - sink.last_audio_time
                 if elapsed > SILENCE_TIMEOUT and len(sink.audio_data) > 0:
                     logger.info("偵測到靜音超時 (%.1fs)，處理語音", elapsed)
                     break
 
-            # 如果已斷線則結束
             if not vc.is_connected():
                 vc.stop_recording()
                 break
@@ -114,27 +110,25 @@ async def voice_loop(vc: discord.VoiceClient, channel_id: int):
 
             # -------- 4. 處理階段 --------
             if sink.interrupted:
-                # 打斷機制：根據主人是否在場選擇不同語音
                 if sink.owner_involved:
-                    logger.info("播放主人版打斷語音: 「你們安靜，吵到我主人講話了」")
+                    logger.info("播放主人版打斷語音")
                     await play_audio_file(vc, TOO_NOISY_OWNER_WAV)
                 else:
-                    logger.info("播放一般打斷語音: 「太吵了，一個一個說」")
+                    logger.info("播放一般打斷語音")
                     await play_audio_file(vc, TOO_NOISY_WAV)
             else:
-                # 正常流程：處理每位說話者的音訊
                 await process_audio(sink, vc, channel_id)
 
         except Exception as e:
             logger.error("語音循環發生錯誤: %s", e, exc_info=True)
-            await asyncio.sleep(0.5)  # 避免錯誤時瘋狂重試
+            await asyncio.sleep(0.5)
 
     _active_loops.pop(guild_id, None)
     logger.info("語音循環結束: guild_id=%d", guild_id)
 
 
 # ============================================================
-# 音訊處理管線
+# 音訊處理管線（每次只回覆一人）
 # ============================================================
 async def process_audio(
     sink: FilteringWaveSink,
@@ -142,35 +136,34 @@ async def process_audio(
     channel_id: int,
 ):
     """
-    管線：WAV 檔 → STT → LLM → TTS → 播放
-    每次只處理「音量最大」的一個使用者，避免多人對話混在一起回答。
-    主人說話時 → LLM 以恭敬態度回答，稱呼「主人」。
-    AI 回覆期間不監聽，播放完才開始下一輪錄音。
+    管線：WAV → STT → LLM → TTS → 播放
+    每次只處理音量最大的一個人，避免多人混雜。
+    AI 回覆期間不監聽，播放完才重新錄音。
     """
     if not sink.audio_data:
         logger.debug("無音訊資料，跳過")
         return
 
-    # 只取音量最大的一個人（避免多人混雜）
-    def _audio_size(item):
+    # 只取音量最大的一個人
+    def _size(item):
         _, ad = item
         return ad.file.getbuffer().nbytes if ad.file else 0
 
-    sorted_users = sorted(sink.audio_data.items(), key=_audio_size, reverse=True)
-    top_user_id, top_audio = sorted_users[0]
+    sorted_users = sorted(sink.audio_data.items(), key=_size, reverse=True)
+    user_id, top_audio = sorted_users[0]
 
     if not top_audio.file or top_audio.file.getbuffer().nbytes == 0:
         return
 
-    # 跳過其他使用者，記錄被忽略的人數
     skipped = len(sorted_users) - 1
     if skipped > 0:
-        logger.info("多人同時說話，只處理 user_id=%d，跳過 %d 人", top_user_id, skipped)
+        logger.info("多人同時說話，只處理 user_id=%d，跳過 %d 人", user_id, skipped)
 
+    wav_path = None
     try:
         # ---- 寫入暫存 WAV ----
         timestamp = int(time.time() * 1000)
-        wav_path = os.path.join(TEMP_DIR, f"user_{top_user_id}_{timestamp}.wav")
+        wav_path = os.path.join(TEMP_DIR, f"user_{user_id}_{timestamp}.wav")
         with open(wav_path, "wb") as f:
             top_audio.file.seek(0)
             f.write(top_audio.file.read())
@@ -182,8 +175,8 @@ async def process_audio(
             logger.info("STT 結果為空，跳過")
             return
 
-        # ---- LLM (辨識是否為主人，傳入對應態度) ----
-        is_owner = (top_user_id == MY_USER_ID)
+        # ---- LLM ----
+        is_owner = (user_id == MY_USER_ID)
         if is_owner:
             logger.info("🎩 主人說話，使用恭敬模式")
         reply = await llm_engine.chat(text, channel_id, is_owner=is_owner)
@@ -198,15 +191,14 @@ async def process_audio(
             logger.warning("TTS 失敗，跳過播放")
             return
 
-        # ---- 播放（AI 回覆期間不監聽，播完才重新錄音）----
+        # ---- 播放 ----
         await play_audio_file(vc, tts_out)
 
     except Exception as e:
-        logger.error("處理音訊時發生錯誤 (user_id=%d): %s", top_user_id, e, exc_info=True)
+        logger.error("處理音訊錯誤 (user_id=%d): %s", user_id, e, exc_info=True)
 
     finally:
-        # 清理暫存 WAV
-        if os.path.exists(wav_path):
+        if wav_path and os.path.exists(wav_path):
             try:
                 os.remove(wav_path)
             except OSError:
@@ -217,24 +209,20 @@ async def process_audio(
 # 播放輔助函式
 # ============================================================
 async def play_audio_file(vc: discord.VoiceClient, file_path: str):
-    """使用 FFmpeg 播放音訊檔案，等待播放完成"""
+    """使用 FFmpeg 播放音訊，等待播放完成"""
     if not os.path.exists(file_path):
         logger.warning("播放檔案不存在: %s", file_path)
         return
 
     if vc.is_playing():
-        vc.stop()  # 中斷當前播放
+        vc.stop()
 
     try:
         source = discord.FFmpegPCMAudio(file_path)
         vc.play(source)
-
-        # 等待播放結束
         while vc.is_playing():
             await asyncio.sleep(0.1)
-
         logger.info("播放完成: %s", file_path)
-
     except Exception as e:
         logger.error("播放失敗 (%s): %s", file_path, e)
 
@@ -249,163 +237,148 @@ async def on_ready():
 
     logger.info("=" * 50)
     logger.info("Bot 已上線: %s (ID: %d)", bot.user.name, bot.user.id)
-    logger.info("主人 ID (特殊態度對象): %d", MY_USER_ID)
+    logger.info("主人 ID: %d", MY_USER_ID)
 
-    # 初始化 STT 引擎（首次載入會下載 tiny 模型）
+    # 初始化 STT
     logger.info("正在載入 faster-whisper 模型...")
     try:
         stt_engine = STTEngine()
         logger.info("STT 引擎就緒")
     except Exception as e:
-        logger.error("STT 引擎初始化失敗: %s", e)
+        logger.error("STT 初始化失敗: %s", e)
         sys.exit(1)
 
-    # 初始化 LLM 引擎
+    # 初始化 LLM
     try:
         llm_engine = LLMEngine()
         logger.info("LLM 引擎就緒")
     except Exception as e:
-        logger.error("LLM 引擎初始化失敗: %s", e)
+        logger.error("LLM 初始化失敗: %s", e)
         sys.exit(1)
 
-    # 初始化 TTS 引擎 (Hugging Face Spaces)
+    # 初始化 TTS
     try:
         tts_engine = TTSEngine()
         logger.info("TTS 引擎就緒: %s", tts_engine.speaker)
     except Exception as e:
-        logger.error("TTS 引擎初始化失敗: %s", e)
+        logger.error("TTS 初始化失敗: %s", e)
         sys.exit(1)
 
-    logger.info("=" * 50)
-    logger.info("✅ 所有引擎就緒，等待指令...")
-    logger.info("   使用 /join 讓 Bot 加入語音頻道")
-
-    # 同步 Slash 指令到 Discord
+    # 同步 Slash 指令
     try:
-        synced = await bot.sync_commands()
-        logger.info("✅ Slash 指令已同步: %d 個指令", len(synced))
+        synced = await bot.tree.sync()
+        logger.info("Slash 指令已同步: %d 個", len(synced))
     except Exception as e:
-        logger.warning("⚠ Slash 指令同步失敗: %s", e)
+        logger.warning("Slash 指令同步失敗: %s", e)
+
+    logger.info("=" * 50)
+    logger.info("全部就緒！使用 /join 讓 Bot 加入語音頻道")
 
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """語音狀態更新 — 當 Bot 被踢出頻道時清理"""
+    """Bot 被踢出頻道時清理"""
     if member.id != bot.user.id:
         return
     if before.channel and not after.channel:
-        # Bot 被踢出或移動到無頻道狀態
         guild_id = member.guild.id
         _active_loops[guild_id] = False
-        logger.info("Bot 已離開語音頻道，清理狀態: guild_id=%d", guild_id)
+        logger.info("Bot 已離開語音頻道: guild_id=%d", guild_id)
 
 
 # ============================================================
 # 指令: /join
 # ============================================================
-@bot.slash_command(name="join", description="讓 Bot 加入你所在的語音頻道並開始監聽")
-async def cmd_join(ctx: discord.ApplicationContext):
+@bot.tree.command(name="join", description="讓 Bot 加入你所在的語音頻道並開始監聽")
+async def cmd_join(interaction: discord.Interaction):
     """加入語音頻道"""
-    # 先 defer 避免 3 秒超時
-    await ctx.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
 
-    # 檢查使用者是否在語音頻道中
-    if not ctx.author.voice or not ctx.author.voice.channel:
-        await ctx.followup.send("❌ 你必須先加入一個語音頻道！", ephemeral=True)
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        await interaction.followup.send("❌ 你必須先加入一個語音頻道！", ephemeral=True)
         return
 
-    channel = ctx.author.voice.channel
+    channel = interaction.user.voice.channel
+    voice_client = interaction.guild.voice_client
 
-    # 檢查 Bot 是否已在語音頻道中
-    if ctx.voice_client is not None:
-        if ctx.voice_client.channel.id == channel.id:
-            await ctx.followup.send(f"⚠ 我已經在 `{channel.name}` 了！", ephemeral=True)
+    if voice_client is not None:
+        if voice_client.channel.id == channel.id:
+            await interaction.followup.send(f"⚠ 我已經在 `{channel.name}` 了！", ephemeral=True)
         else:
-            await ctx.voice_client.move_to(channel)
-            await ctx.followup.send(f"🔊 已移動到 `{channel.name}`")
+            await voice_client.move_to(channel)
+            await interaction.followup.send(f"🔊 已移動到 `{channel.name}`")
         return
 
-    # 連接到語音頻道
     try:
         vc = await channel.connect()
     except Exception as e:
         logger.error("無法連接到語音頻道: %s", e)
-        await ctx.followup.send(f"❌ 無法連線: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ 無法連線: {e}", ephemeral=True)
         return
 
-    await ctx.followup.send(f"🔊 已加入 `{channel.name}`，開始監聽！")
-
-    # 啟動語音處理循環（非同步背景執行）
+    await interaction.followup.send(f"🔊 已加入 `{channel.name}`，開始監聽！")
     asyncio.create_task(voice_loop(vc, channel.id))
 
 
 # ============================================================
 # 指令: /leave
 # ============================================================
-@bot.slash_command(name="leave", description="讓 Bot 離開語音頻道")
-async def cmd_leave(ctx: discord.ApplicationContext):
+@bot.tree.command(name="leave", description="讓 Bot 離開語音頻道")
+async def cmd_leave(interaction: discord.Interaction):
     """離開語音頻道"""
-    await ctx.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
 
-    vc = ctx.voice_client
+    vc = interaction.guild.voice_client
 
     if vc is None:
-        await ctx.followup.send("❌ Bot 目前不在任何語音頻道中", ephemeral=True)
+        await interaction.followup.send("❌ Bot 目前不在任何語音頻道中", ephemeral=True)
         return
 
-    # 停止語音循環
-    guild_id = ctx.guild.id
+    guild_id = interaction.guild_id
     _active_loops[guild_id] = False
 
-    # 停止錄音
     if vc.recording:
         vc.stop_recording()
-
-    # 中斷播放
     if vc.is_playing():
         vc.stop()
 
-    # 斷線
     await vc.disconnect()
 
-    # 清除對話歷史
     if llm_engine:
-        llm_engine.clear_history(ctx.channel.id)
+        llm_engine.clear_history(interaction.channel_id)
 
-    await ctx.followup.send("👋 已離開語音頻道")
+    await interaction.followup.send("👋 已離開語音頻道")
 
 
 # ============================================================
 # 指令: /set_voice
 # ============================================================
-@bot.slash_command(name="set_voice", description="切換 TTS 角色聲音")
-async def cmd_set_voice(
-    ctx: discord.ApplicationContext,
-    character: discord.Option(str, "角色名稱 (例如: 纳西妲 Nahida (Genshin Impact))"),
-):
+@bot.tree.command(name="set_voice", description="切換 TTS 角色聲音")
+@app_commands.describe(character="角色名稱，例如：纳西妲 Nahida (Genshin Impact)")
+async def cmd_set_voice(interaction: discord.Interaction, character: str):
     """切換 TTS 角色"""
     if tts_engine is None:
-        await ctx.respond("❌ TTS 引擎尚未初始化", ephemeral=True)
+        await interaction.response.send_message("❌ TTS 引擎尚未初始化", ephemeral=True)
         return
 
     tts_engine.update_character(character)
-    await ctx.respond(f"🎤 TTS 角色已切換為 `{character}`")
+    await interaction.response.send_message(f"🎤 TTS 角色已切換為 `{character}`")
 
 
 # ============================================================
 # 指令: /status
 # ============================================================
-@bot.slash_command(name="status", description="查看 Bot 目前狀態")
-async def cmd_status(ctx: discord.ApplicationContext):
+@bot.tree.command(name="status", description="查看 Bot 目前狀態")
+async def cmd_status(interaction: discord.Interaction):
     """顯示 Bot 狀態"""
-    vc = ctx.voice_client
+    vc = interaction.guild.voice_client if interaction.guild else None
     voice_status = "未連接"
     if vc and vc.is_connected():
         voice_status = f"在 `{vc.channel.name}`"
         if vc.recording:
             voice_status += " (錄音中)"
 
-    tts_char = tts_engine.character if tts_engine else "未初始化"
+    tts_char = tts_engine.speaker if tts_engine else "未初始化"
 
     msg = (
         f"**Bot 狀態**\n"
@@ -415,7 +388,7 @@ async def cmd_status(ctx: discord.ApplicationContext):
         f"• STT: `faster-whisper tiny (CPU)`\n"
         f"• 主人 ID: `{MY_USER_ID}`\n"
     )
-    await ctx.respond(msg, ephemeral=True)
+    await interaction.response.send_message(msg, ephemeral=True)
 
 
 # ============================================================
